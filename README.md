@@ -1,2 +1,2 @@
 # ctd-conductivity-project
-ESP32 I2C scan for CN0349 board (AD5934 and ADG715 detection)
+Embedded conductivity measurement project using ESP32 and CN0349 for CTD applications
