@@ -16,7 +16,7 @@
 #define MCLK_HZ       1000000.0f
 
 // ── PARAMETRES CAPTEUR IST LFS1K0.1305.6W.B.010-6 ──────────────────────
-#define K_CELL_CM     0.86f           // cm^-1
+#define K_CELL_CM     100.0f           // cm^-1
 #define RCAL_OHMS     100.0f
 #define R2_SERIES     100.0f          // R2 en série avec la cellule (CN0349)
 
