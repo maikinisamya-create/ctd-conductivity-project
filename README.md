@@ -4,6 +4,18 @@
 
 Ce dépôt contient les firmwares ESP32 pour le module Analog Devices **CN0349** (puce d'analyse d'impédance **AD5934** + multiplexeur **ADG715**), utilisé avec une cellule de conductivité 2 électrodes pour mesurer la conductivité de l'eau (typiquement eau de mer), la profondeur (capteur Bar30) et en déduire la salinité (PSS‑78).
 
+## Vue d'ensemble du pipeline complet
+
+Le projet couvre toute la chaîne, du câblage matériel jusqu'à la validation chiffrée des mesures :
+
+1. **Câblage** (§2) : montage CN0349/AD5934 + capteurs T/P/RTC/SD sur ESP32, puis vérification I2C avec `i2c_scan` avant toute mesure.
+2. **Sweep de calibration** (`sweep_freq_v3.ino`, §8) : balayage fréquentiel manuel sur des échantillons de salinité connue, pour caractériser la réponse réelle de la cellule.
+3. **Régression** (`regression_salinite_vs_freq.py`, §9) : à partir des relevés du sweep, extraction des coefficients `A_SAL`/`B_SAL` reliant fréquence optimale et salinité.
+4. **Déploiement autonome** (`CTD_adaptatif_v3.ino`, §7) : firmware de production qui exploite ces coefficients pour sélectionner automatiquement sa fréquence de mesure, calculer la salinité pratique PSS‑78 (température **et** pression) et enregistrer chaque cycle sur carte SD, sans opérateur.
+5. **Validation** (`certified.py`, §9) : comparaison chiffrée des salinités mesurées sur le terrain à des valeurs de référence connues (graphe d'erreur par palier, CSV de sortie) — la preuve que le calibrage tient.
+
+**Précision sur la nature du système** : il s'agit d'un système de **monitoring** — des mesures répétées dans le temps à une position donnée (bouée, capteur immergé fixe) — et non d'un **profileur** (mesure verticale continue sur toute la colonne d'eau). Cela ne réduit en rien la complexité de ce qui a été mis en œuvre : sélection adaptative de fréquence par itérations convergentes, calibration active à chaque cycle, correction PSS‑78 complète (température + pression), journalisation robuste des erreurs, et validation quantifiée contre une référence indépendante — soit une chaîne de mesure complète et vérifiée de bout en bout, du signal électrique brut jusqu'à la salinité en PSU.
+
 | Fichier | Rôle |
 |---|---|
 | `AD5934_CN0349.h` | **Header partagé** : pilote bas niveau AD5934/ADG715 — I2C, calibration, mesure. Utilisé par le code adaptatif. |
@@ -31,8 +43,8 @@ Base logicielle de référence pour la puce AD5934 / ADG715 : [joshagirgis/CN034
 
 ## 2. Matériel
 
-- ESP32 (carte **FireBeetle-ESP32**, DFRobot — dite « LittObs »)
-- Module CN0349 (AD5934 + ADG715) + cellule de conductivité 2 électrodes
+- ESP32 (carte **FireBeetle-ESP32**, DFRobot, réf. **DFR0478** — dite « LittObs »)
+- Module CN0349 (AD5934 + ADG715) + cellule de conductivité 2 électrodes **Atlas Scientific — Kit de Conductivité Complet EZO, Mini K 0.1** (la sonde elle-même)
 - Capteur de température TSYS01 (I2C)
 - Capteur de pression/profondeur MS5837 Bar30, Blue Robotics (I2C) — **code adaptatif uniquement**
 - RTC DS3231M (I2C)
@@ -47,13 +59,13 @@ Base logicielle de référence pour la puce AD5934 / ADG715 : [joshagirgis/CN034
 | SD (SPI) | CS → GPIO5 (+ MOSI/MISO/SCK VSPI standard) |
 | LED témoin | GPIO25 |
 
-Pour le câblage détaillé du CN0349 (connecteur 8 broches SCL/SDA/DGND/VDD), voir le pinout dans le [repo joshagirgis/CN0349-Arduino-Based-Library](https://github.com/joshagirgis/CN0349-Arduino-Based-Library#wiring). La LED de la carte CN0349 doit s'allumer si le câblage I2C est correct.
+Pour le câblage détaillé du CN0349 (connecteur 8 broches, 2 rangées de 4 : SCL/SDA/DGND/VDD répété sur chaque rangée), voir le pinout dans le [repo joshagirgis/CN0349-Arduino-Based-Library](https://github.com/joshagirgis/CN0349-Arduino-Based-Library#wiring) — tenir la carte avec le connecteur à vis face à soi et le connecteur 8 broches à l'opposé pour lire le pinout dans le bon sens. VDD → 3.3V, DGND → GND. La LED de la carte CN0349 doit s'allumer si le câblage I2C est correct.
 
 ---
 
 ## 3. Bibliothèques à installer (Arduino IDE)
 
-1. **Carte FireBeetle-ESP32** (DFRobot, pas une carte ESP32 générique Espressif) : Fichier → Préférences → champ **"Additional boards manager URLs"** → coller `http://download.dfrobot.top/FireBeetle/package_esp32_index.json` → puis Outils → Type de carte → Gestionnaire de cartes → chercher **FireBeetle** → installer → sélectionner `FireBeetle-ESP32` dans le menu déroulant des cartes.
+1. **Carte FireBeetle-ESP32** (DFRobot, réf. DFR0478 — pas une carte ESP32 générique Espressif) : Fichier → Préférences → champ **"Additional boards manager URLs"** → coller `http://download.dfrobot.top/FireBeetle/package_esp32_index.json` → puis Outils → Type de carte → Gestionnaire de cartes → chercher **"esp32"** → installer le paquet correspondant (celui-ci inclut aussi les cartes DFRobot FireBeetle). Pour sélectionner la carte ensuite (Arduino IDE 2.x) : clique sur le menu déroulant de carte/port en haut (à côté du bouton ▶️) → **"Select other board and port..."** → tape **"firebee"** dans la recherche BOARDS → choisis **`FireBeetle-ESP32`** → sélectionne le bon port COM à droite → OK.
 2. **Gestionnaire de bibliothèques** (Croquis → Inclure une bibliothèque → Gérer les bibliothèques), installer :
    - `TSYS01` (Blue Robotics)
    - `DS3231` (bibliothèque RTC DS3231)
@@ -84,8 +96,8 @@ sweep_freq_v3/
 Étapes :
 1. Créer les dossiers ci‑dessus et y placer les fichiers correspondants (copier les deux `.h` dans le dossier du code adaptatif — l'IDE les affichera comme deux onglets à côté du `.ino` principal).
 2. Ouvrir le `.ino` voulu dans Arduino IDE.
-3. Outils → Type de carte → sélectionner `FireBeetle-ESP32`.
-4. Outils → Port → sélectionner le port COM de l'ESP32.
+3. Menu déroulant carte/port en haut → "Select other board and port..." → chercher "firebee" → choisir `FireBeetle-ESP32`.
+4. Dans la même fenêtre, sélectionner le port COM de l'ESP32 (à droite) → OK.
 5. Vérifier/Téléverser (flèche →).
 6. Ouvrir le **Moniteur série** à **115200 bauds** pour voir les logs et envoyer des commandes.
 
@@ -119,6 +131,8 @@ Contient tout ce qui pilote directement la puce, indépendamment de l'algorithme
 
 - `calculerSP(sigma_mScm, T_degC, P_dbar)` : PSS‑78 complet (Fofonoff & Millard, UNESCO 1983), avec correction de température **et** correction de pression `Rp` (coefficients `e1,e2,e3,d1,d2,d3,d4`). `P_dbar` peut être approximée par la profondeur en mètres (1 dbar ≈ 1 m en eau de mer).
 - `calculerC25(SP)` : salinité → conductivité de référence à 25 °C / 0 dbar.
+
+**Plage de validité : 2 à 42 PSU.** L'échelle PSS‑78 (et les coefficients du polynôme utilisés ici) n'est officiellement valable que sur cette plage ; en dehors (eau douce en dessous de 2 PSU, saumure au‑dessus de 42 PSU), le résultat n'est plus fiable même si le code ne renvoie pas d'erreur (il borne juste le résultat entre 0 et 45 PSU par sécurité numérique, sans garantir l'exactitude physique hors de 2–42 PSU).
 
 Header autonome, ne dépend que de `math.h`.
 
