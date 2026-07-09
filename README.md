@@ -8,8 +8,10 @@ Ce dépôt contient les firmwares ESP32 pour le module Analog Devices **CN0349**
 |---|---|
 | `AD5934_CN0349.h` | **Header partagé** : pilote bas niveau AD5934/ADG715 — I2C, calibration, mesure. Utilisé par le code adaptatif. |
 | `PSS78.h` | **Header partagé** : calcul de la salinité pratique PSS‑78 (avec correction de pression). Utilisé par le code adaptatif. |
-| `conductivite_adaptative_v9_pression.ino` | Algorithme **adaptatif** : cherche automatiquement la fréquence de mesure optimale, itère jusqu'à convergence, mesure aussi la pression/profondeur, enregistre 1 mesure/cycle sur carte SD, journalise les erreurs. Code de **production** pour un déploiement autonome. Utilise les deux headers ci‑dessus. |
-| `sweep_depuis_v9.ino` | **Balayage fréquentiel manuel** sur une plage fixe : mesure à chaque fréquence sans sélection automatique, affiche un tableau complet sur le port série. Outil de **diagnostic / calibration**. **Fichier autonome, non modifié** : il contient encore sa propre copie du code bas niveau et de PSS‑78 (sans pression, sans log) et n'utilise pas les deux headers. |
+| `CTD_adaptatif_v3.ino` | Algorithme **adaptatif** : cherche automatiquement la fréquence de mesure optimale, itère jusqu'à convergence, mesure aussi la pression/profondeur, enregistre 1 mesure/cycle sur carte SD, journalise les erreurs. Code de **production** pour un déploiement autonome. Utilise les deux headers ci‑dessus. |
+| `sweep_freq_v3.ino` | **Balayage fréquentiel manuel** sur une plage fixe : mesure à chaque fréquence sans sélection automatique, affiche un tableau complet sur le port série. Outil de **diagnostic / calibration**, **à utiliser en premier**, avant tout le reste (voir §9). **Fichier autonome, non modifié** : il contient encore sa propre copie du code bas niveau et de PSS‑78 (sans pression, sans log) et n'utilise pas les deux headers. |
+| `regression_salinite_vs_freq.py` | Script Python (PC) : régression `salinite = A_SAL × f_opt^B_SAL` à partir des points (fréquence optimale, salinité connue) relevés avec le sweep. Sort `A_SAL`/`B_SAL` à reporter dans le firmware, + graphe courbe/résidus. À exécuter **après** le sweep (voir §9). |
+| `certified.py` | Script Python (PC) de **validation** : compare les salinités mesurées par la sonde intégrée sur un sweep complet (CSV embarqué dans le script) à des valeurs de référence mesurées manuellement sur les mêmes échantillons. Sort un graphe salinité/temps + un graphe d'erreur par palier, et un CSV `erreur_salinite_30_06_vs_19_06.csv`. À exécuter **après** le sweep (voir §9). |
 
 Base logicielle de référence pour la puce AD5934 / ADG715 : [joshagirgis/CN0349-Arduino-Based-Library — CN0349Test.ino](https://github.com/joshagirgis/CN0349-Arduino-Based-Library/blob/master/CN0349Test/CN0349Test.ino) (exemple d'origine pour la calibration et la mesure), voir aussi le [README du dépôt](https://github.com/joshagirgis/CN0349-Arduino-Based-Library) pour le pinout, le calcul des facteurs de gain et les précautions RF.
 
@@ -67,16 +69,16 @@ Arduino exige que chaque `.ino` soit dans un dossier du même nom, et que ses fi
 
 **Code adaptatif** (utilise les headers) :
 ```
-conductivite_adaptative_v9_pression/
-├── conductivite_adaptative_v9_pression.ino
+CTD_adaptatif_v3/
+├── CTD_adaptatif_v3.ino
 ├── AD5934_CN0349.h
 └── PSS78.h
 ```
 
 **Sweep** (autonome, tout dans le `.ino`) :
 ```
-sweep_depuis_v9/
-└── sweep_depuis_v9.ino
+sweep_freq_v3/
+└── sweep_freq_v3.ino
 ```
 
 Étapes :
@@ -122,7 +124,7 @@ Header autonome, ne dépend que de `math.h`.
 
 ---
 
-## 7. `conductivite_adaptative_v9_pression.ino` (mesure autonome)
+## 7. `CTD_adaptatif_v3.ino` (mesure autonome)
 
 ### Objectif
 
@@ -164,7 +166,7 @@ Niveaux : `[WARN]` (capteur absent, sonde hors eau, itération invalide), `[ERR]
 
 ---
 
-## 8. `sweep_depuis_v9.ino` (balayage manuel de diagnostic, inchangé)
+## 8. `sweep_freq_v3.ino` (balayage manuel de diagnostic, inchangé)
 
 ### Objectif
 
@@ -178,7 +180,7 @@ C'est un outil de **labo / calibration**, à faire tourner avant de faire confia
 
 ### Ce sketch n'a volontairement pas été touché
 
-Contrairement au code adaptatif, `sweep_depuis_v9.ino` n'utilise pas `AD5934_CN0349.h` ni `PSS78.h` : il garde sa propre copie interne des mêmes fonctions bas niveau et de `calculerSP()`/`calculerC25()` (version **sans** correction de pression), exactement comme dans la version précédente. Il n'a donc pas non plus le capteur MS5837 ni le système de log SD. C'est un choix assumé pour ne pas risquer de casser un outil de diagnostic déjà validé — voir §10 si tu veux un jour l'aligner sur les nouveaux headers.
+Contrairement au code adaptatif, `sweep_freq_v3.ino` n'utilise pas `AD5934_CN0349.h` ni `PSS78.h` : il garde sa propre copie interne des mêmes fonctions bas niveau et de `calculerSP()`/`calculerC25()` (version **sans** correction de pression), exactement comme dans la version précédente. Il n'a donc pas non plus le capteur MS5837 ni le système de log SD. C'est un choix assumé pour ne pas risquer de casser un outil de diagnostic déjà validé — voir §11 si tu veux un jour l'aligner sur les nouveaux headers.
 
 Balayage : pour chaque fréquence de `SWEEP_FREQ_START` (60 kHz) à `SWEEP_FREQ_STOP` (65 kHz), pas `SWEEP_INCR_HZ` (200 Hz) → 26 points. Pour chaque point : `calibrerFreq(f)` puis `mesurerFreq(f)`, calcul de `SP`/`sigma25`, stockage dans `tableauSweep[i]` (pas de sélection automatique du meilleur point). Le tableau complet est imprimé **une seule fois** sur le port série à la fin du balayage :
 
@@ -196,9 +198,22 @@ Freq_kHz | sigma_mScm | SP_PSU | sigma25_mScm
 
 ---
 
-## 9. Comparaison
+## 9. Ordre d'utilisation : le sweep AVANT tout le reste
 
-| | `conductivite_adaptative_v9_pression.ino` | `sweep_depuis_v9.ino` |
+Le sweep (`sweep_freq_v3.ino`) n'est pas optionnel : c'est la première étape, sur laquelle reposent ensuite le calibrage du code adaptatif et sa validation. Ordre à respecter :
+
+1. **`sweep_freq_v3.ino`** — immerger la sonde dans plusieurs échantillons de salinité connue (étalons ou eau de mer titrée), relever à chaque fois le tableau complet affiché sur le port série (fréquence, sigma, SP, sigma25), et noter la fréquence la plus stable pour chaque échantillon. Sans ce relevé, il n'y a aucune donnée sur laquelle caler le code adaptatif.
+2. **`regression_salinite_vs_freq.py`** — reporter les couples (fréquence optimale relevée, salinité connue de l'échantillon) dans le script, l'exécuter (`pip install numpy scipy matplotlib` puis `python regression_salinite_vs_freq.py`), et récupérer les coefficients `A_SAL`/`B_SAL` affichés (+ le graphe `regression_salinite_vs_freq.png`).
+3. **Déploiement de `CTD_adaptatif_v3.ino`** — utiliser les coefficients obtenus à l'étape 2 (`A_COEF`/`B_COEF` dans `estimerFopt()`) pour que l'algorithme adaptatif choisisse automatiquement une fréquence cohérente avec les valeurs de salinité observées au sweep.
+4. **`certified.py`** — une fois des mesures de terrain collectées (ou un nouveau sweep complet sur les mêmes échantillons de référence), ce script compare les salinités obtenues à la référence connue et sort un graphe d'erreur par palier : sert à **valider a posteriori** que le calibrage tient (étape de contrôle, pas de calibrage).
+
+En résumé : sweep → régression → déploiement → validation. Si les résultats du sweep ou la relation fréquence/salinité changent (autre type d'eau, dérive de la cellule...), il faut refaire le sweep et relancer `regression_salinite_vs_freq.py` pour obtenir de nouveaux `A_SAL`/`B_SAL`.
+
+---
+
+## 10. Comparaison
+
+| | `CTD_adaptatif_v3.ino` | `sweep_freq_v3.ino` |
 |---|---|---|
 | Objectif | Mesure autonome de terrain | Diagnostic / calibration en labo |
 | Code bas niveau | Factorisé dans `AD5934_CN0349.h`/`PSS78.h` | Copié en interne (non factorisé) |
@@ -212,7 +227,7 @@ Freq_kHz | sigma_mScm | SP_PSU | sigma25_mScm
 
 ---
 
-## 10. Points d'attention / pistes d'amélioration
+## 11. Points d'attention / pistes d'amélioration
 
 - Le sweep prend plus de temps qu'un cycle adaptatif (26 calibrations + 26 mesures au lieu d'1 à 3‑4 en général) : à prévoir avant un test en continu.
 - Sans écriture SD, les données du sweep sont perdues si le port série n'est pas enregistré côté PC.
