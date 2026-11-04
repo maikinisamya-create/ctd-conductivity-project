@@ -49,8 +49,8 @@
 #define F_INIT             20000.0f
 #define F_MIN              3000.0f
 #define F_MAX              80000.0f
-#define A_COEF             0.2147f
-#define B_COEF             1.3582f
+#define A_COEF             0.0975f
+#define B_COEF             1.6359f
 #define MAX_ITER           20
 #define SEUIL_F_HZ         20.0f
 #define SEUIL_SIGMA        0.1f
