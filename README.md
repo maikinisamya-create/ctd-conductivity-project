@@ -149,7 +149,7 @@ Déploiement de terrain sans opérateur (capteur immergé, bouée) : à chaque c
 - **LED / RTC / SD** : `ledBlink`, `lireDatetime`, `lireDate`, `reglerRTCSerie`, `getNomFichier`, `getEnTeteCSV`, `ecrireSD`, `lireSD`.
 - **`lireTemperature()`** : lecture TSYS01, retombe sur `TEMP_FALLBACK = 20 °C` si absent/hors plage.
 - **`lireProfondeur(&pression_mbar)`** : lecture MS5837 Bar30 → profondeur (m, calculée manuellement à partir de la pression brute et de la densité de l'eau de mer, utilisée comme approximation de `P_dbar`) + pression brute (mbar) en sortie. Retombe sur `P = 0` si absent.
-- **`estimerFopt(sigma)`** : formule empirique `f = A_COEF × sigma^B_COEF` (`A_COEF=0.2147`, `B_COEF=1.3582`), bornée entre `F_MIN=3 kHz` et `F_MAX=80 kHz`.
+- **`estimerFopt(sigma)`** : formule empirique `f = A_COEF × sigma^B_COEF` (`A_COEF=0.0975`, `B_COEF=1.6359`), bornée entre `F_MIN=3 kHz` et `F_MAX=80 kHz`.
 - **`mesureAdaptative()`** — cœur de l'algorithme (appelle `calibrerFreq`/`mesurerFreq` du header, `calculerSP`/`calculerC25` de `PSS78.h`) :
   1. **Mesure initiale** à `F_INIT = 20 kHz` en gamme HIGH (+ lecture température/profondeur). Si `sigma < SIGMA_SEUIL_GAMME` (2,0 mS/cm), bascule en gamme LOW et remesure. Si toujours invalide → sonde hors de l'eau, résultat "sigma=0" stocké.
   2. **Estimation de `f_opt`** via `estimerFopt()`.
