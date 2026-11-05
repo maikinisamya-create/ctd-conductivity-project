@@ -247,3 +247,5 @@ En résumé : sweep → régression → déploiement → validation. Si les rés
 - Sans écriture SD, les données du sweep sont perdues si le port série n'est pas enregistré côté PC.
 - Le sweep ne teste que la gamme HIGH.
 - Le sweep n'a pas (encore) le capteur MS5837 ni le système de log SD — si tu veux les ajouter un jour, le plus simple serait de le faire passer aussi par `AD5934_CN0349.h`/`PSS78.h` (en lui ajoutant un `logMessage()` minimal, par exemple juste `Serial.println`), ce qui règlerait en même temps la duplication de code restante.
+
+Contact : Samya Lmaikini – maikinisamya@gmail.com
